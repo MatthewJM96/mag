@@ -64,7 +64,8 @@ include { CENTRIFUGE_DB_PREPARATION                           } from '../modules
 include { CENTRIFUGE                                          } from '../modules/local/centrifuge'
 include { KRAKEN2_DB_PREPARATION                              } from '../modules/local/kraken2_db_preparation'
 include { KRAKEN2                                             } from '../modules/local/kraken2'
-include { KRONA_DB                                            } from '../modules/local/krona_db'
+include { KRONA_TAXONOMY_DB                                   } from '../modules/local/krona_db'
+include { KRONA_ACCESSIONS_DB                                 } from '../modules/local/krona_db'
 include { KRONA                                               } from '../modules/local/krona'
 include { POOL_SINGLE_READS as POOL_SHORT_SINGLE_READS        } from '../modules/local/pool_single_reads'
 include { POOL_PAIRED_READS                                   } from '../modules/local/pool_paired_reads'
@@ -123,6 +124,8 @@ include { MMSEQS_DATABASES                       } from '../modules/nf-core/mmse
 include { METAEUK_EASYPREDICT                    } from '../modules/nf-core/metaeuk/easypredict/main'
 include { CUSTOM_DUMPSOFTWAREVERSIONS            } from '../modules/nf-core/custom/dumpsoftwareversions/main'
 include { MULTIQC                                } from '../modules/nf-core/multiqc/main'
+include { DIAMOND_BLASTX                         } from '../modules/nf-core/diamond/blastx/main'
+include { UNTAR                                  } from '../modules/nf-core/untar/main'
 
 ////////////////////////////////////////////////////
 /* --  Create channel for reference databases  -- */
@@ -159,15 +162,21 @@ if (params.gunc_db) {
 }
 
 if(params.centrifuge_db){
-    ch_centrifuge_db_file = file(params.centrifuge_db, checkIfExists: true)
+    ch_centrifuge_db_file = path(params.centrifuge_db, checkIfExists: true)
 } else {
     ch_centrifuge_db_file = []
 }
 
 if(params.kraken2_db){
-    ch_kraken2_db_file = file(params.kraken2_db, checkIfExists: true)
+    ch_kraken2_db_file = path(params.kraken2_db, checkIfExists: true)
 } else {
     ch_kraken2_db_file = []
+}
+
+if(params.diamond_db){
+    ch_diamond_db_file = path(params.diamond_db, checkIfExists: true)
+} else {
+    ch_diamond_db_file = []
 }
 
 if(params.cat_db){
@@ -178,10 +187,9 @@ if(params.cat_db){
 }
 
 if(params.krona_db){
-    ch_krona_db_file = Channel
-        .value(file( "${params.krona_db}" ))
+    ch_krona_db_file = path( "${params.krona_db}", checkIfExists: true)
 } else {
-    ch_krona_db_file = Channel.empty()
+    ch_krona_db_file = []
 }
 
 if(!params.keep_phix) {
@@ -523,13 +531,84 @@ workflow MAG {
     )
     ch_versions = ch_versions.mix(KRAKEN2.out.versions.first())
 
-    if (( params.centrifuge_db || params.kraken2_db ) && !params.skip_krona){
-        if (params.krona_db){
-            ch_krona_db = ch_krona_db_file
+    if ( !ch_diamond_db_file.isEmpty() ) {
+        if ( ch_diamond_db_file.extension in ['gz', 'tgz'] ) {
+            // Expects to be tar.gz!
+            // First map as UNTAR wants a meta but we don't care about naming directory
+            // it extracts to.
+            // Second map to get just the path to a directory, dropping empty meta.
+            ch_diamond_db_dir = UNTAR ( ch_diamond_db_file.map { [[], it] } ).untar.map { it[1] }
+            ch_versions = ch_versions.mix(UNTAR.out.versions)
         } else {
-            KRONA_DB ()
-            ch_krona_db = KRONA_DB.out.db
+            ch_diamond_db_dir = ch_diamond_db_file
         }
+
+        if (ch_diamond_db_dir.isDirectory()) {
+            ch_db_for_diamond = Channel
+                                    .fromPath( "${ch_diamond_db_dir}/*.dmnd" )
+                                    .collect()
+                                    .map{
+                                        db ->
+                                            def db_name = db[0].getBaseName().split('\\.')[0]
+                                            [ db_name, db ]
+                                    }
+                                    .collect()
+                                    .map{
+                                        files ->
+                                            if (files.size() == 1) {
+                                                def db_name = files[0].getBaseName().split('\\.')[0]
+                                                [ db_name, files[0] ]
+                                            } else if (files.size() > 1) {
+                                                error("DIAMOND requires one '*.dmnd' file, multiple exist in configured directory.")
+                                            else if (files.size() == 0)
+                                                error("DIAMOND requires one '*.dmnd' file, none exists in configured directory.")
+                                            }
+                                    }
+        } else {
+            ch_db_for_diamond = Channel.empty()
+        }
+    } else {
+        ch_db_for_diamond = Channel.empty()
+    }
+
+    DIAMOND_BLASTX (
+        ch_short_reads,
+        ch_db_for_diamond,
+        6,
+        ""
+    )
+    ch_versions = ch_versions.mix(DIAMOND_BLASTX.out.versions.first())
+
+    // TODO(Matthew): DIAMOND_BLASTX.out.results_for_krona does not exist but
+    //                Krona can read BLAST tabs, so using that for now. Do we
+    //                want to unify it with Kraken2 and Centrifuge?
+
+    if (( params.centrifuge_db || params.kraken2_db || params.diamond_db ) && !params.skip_krona) {
+        if (params.krona_db) {
+            if ( ch_krona_db_file.extension in ['gz', 'tgz'] ) {
+                // Expects to be tar.gz!
+                // First map as UNTAR wants a meta but we don't care about naming directory
+                // it extracts to.
+                // Second map to get just the path to a directory, dropping empty meta.
+                ch_krona_db = UNTAR ( ch_krona_db_file.map { [[], it] } ).untar.map { it[1] }
+                ch_versions = ch_versions.mix(UNTAR.out.versions)
+            } else if (ch_krona_db_file.isDirectory()) {
+                ch_krona_db = ch_krona_db_file
+            } else {
+                error("Pre-preparaed Krona DB must be specified as a directory.")
+            }
+        } else {
+            KRONA_TAXONOMY_DB ()
+            if (params.diamond_db) {
+                KRONA_ACCESSIONS_DB (KRONA_TAXONOMY_DB.out.db)
+                ch_krona_db = KRONA_ACCESSIONS_DB.out.db
+            } else {
+                ch_krona_db = KRONA_TAXONOMY_DB.out.db
+            }
+        }
+    }
+
+    if (( params.centrifuge_db || params.kraken2_db ) && !params.skip_krona){
         ch_tax_classifications = CENTRIFUGE.out.results_for_krona.mix(KRAKEN2.out.results_for_krona)
             . map { classifier, meta, report ->
                 def meta_new = meta + [classifier: classifier]
@@ -540,6 +619,18 @@ workflow MAG {
             ch_krona_db
         )
         ch_versions = ch_versions.mix(KRONA.out.versions.first())
+    }
+
+    if (params.diamond_db && !params.skip_krona) {
+        ch_diamond_tax_classifications = DIAMOND_BLASTX.out.txt.map { meta, report ->
+            def meta_new = meta + [classifier: 'diamond']
+            [ meta_new, report ]
+        }
+        KRONA_BLAST(
+            ch_diamond_tax_classifications,
+            ch_krona_db
+        )
+        ch_versions = ch_versions.mix(KRONA_BLAST.out.versions.first())
     }
 
     /*
