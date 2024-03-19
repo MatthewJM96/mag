@@ -173,6 +173,21 @@ More information on the [Centrifuge](https://ccb.jhu.edu/software/centrifuge/) w
   - `report.txt`: Tab-delimited result file. See the [centrifuge manual](https://ccb.jhu.edu/software/centrifuge/manual.shtml#centrifuge-classification-output) for information about the fields
   - `kreport.txt`: Classification in the Kraken report format. See the [kraken2 manual](https://github.com/DerrickWood/kraken2/wiki/Manual#output-formats) for more details
   - `taxonomy.krona.html`: Interactive pie chart produced by [KronaTools](https://github.com/marbl/Krona/wiki)
+</details>
+
+### DIAMOND
+
+DIAMOND is an optimised code capable of performing BLAST classification of protein and DNA with support for long-read analysis. The runtime of DIAMOND varies from 80-8000x faster than BLAST, depending on alignment sensitivity setting chosen (80x for sensitivity matching BLAST).
+
+More information on the [DIAMOND](https://github.com/bbuchfink/diamond) GitHub repository.
+
+<details markdown="1">
+<summary>Output files</summary>
+
+- `Taxonomy/diamond/[sample]/`
+  - `report.txt`: Tab-delimited result file. See the [diamond docs](https://gensoft.pasteur.fr/docs/diamond/2.0.2/3_Command_line_options.html#output-options) for information about the fields (the default here is the same as DIAMOND).
+  - `report.log`: Log file of DIAMOND run.
+  - `taxonomy.krona.html`: Interactive pie chart produced by [KronaTools](https://github.com/marbl/Krona/wiki)
 
 </details>
 
