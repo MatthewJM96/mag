@@ -1,4 +1,4 @@
-process KRONA_DB {
+process KRONA_TAXONOMY_DB {
 
     conda "bioconda::krona=2.7.1"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
@@ -16,6 +16,28 @@ process KRONA_DB {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         ktImportTaxonomy: \$(ktImportTaxonomy 2>&1 | sed -n '/KronaTools /p' | sed 's/^.*KronaTools //; s/ - ktImportTaxonomy.*//')
+    END_VERSIONS
+    """
+}
+
+process KRONA_ACCESSIONS_DB {
+
+    conda "bioconda::krona=2.7.1"
+    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
+        'https://depot.galaxyproject.org/singularity/krona:2.7.1--pl526_5' :
+        'biocontainers/krona:2.7.1--pl526_5' }"
+
+    output:
+    path("accessions/accessions.tab"), emit: db
+    path "versions.yml"              , emit: versions
+
+    script:
+    """
+    updateAccessions.sh accessions
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        ktImportBLAST: \$(ktImportBLAST 2>&1 | sed -n '/KronaTools /p' | sed 's/^.*KronaTools //; s/ - ktImportBLAST.*//')
     END_VERSIONS
     """
 }
